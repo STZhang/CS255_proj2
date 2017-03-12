@@ -1,0 +1,106 @@
+#!/usr/bin/env python
+import argparse
+from urlparse import urlparse
+import sys
+import OpenSSL
+import socket
+
+def initParser():
+	parser = argparse.ArgumentParser()
+	parser.add_argument('url')
+	parser.add_argument('--tlsv1.0', action='store_true')
+	parser.add_argument('--tlsv1.1', action='store_true')
+	parser.add_argument('--tlsv1.2', action='store_true')
+	parser.add_argument('--sslv3', action='store_true')
+	parser.add_argument('-3', action='store_true')
+	parser.add_argument('--ciphers')
+	parser.add_argument('--crlfile')
+	parser.add_argument('--cacert')
+	parser.add_argument('--allow-stale-certs')
+	parser.add_argument('--pinnedcertificate')
+	return parser
+
+def callback(conn, cert, errnum, depth, ok):
+	return True
+
+if __name__ == '__main__':
+	# add arguments
+	try:
+		parser = initParser()
+		# parse
+		args = vars(parser.parse_args(sys.argv[1:]))
+		version = OpenSSL.SSL.TLSv1_2_METHOD
+		if args['tlsv1.0'] == True:
+			version = OpenSSL.SSL.TLSv1_METHOD
+		if args['tlsv1.1'] == True:
+			version = OpenSSL.SSL.TLSv1_1_METHOD
+		if args['tlsv1.2'] == True:
+			version = OpenSSL.SSL.TLSv1_2_METHOD
+		if args['sslv3'] == True or args['3'] == True:
+			version = OpenSSL.SSL.SSLv3_METHOD
+	except: 
+		print >> sys.stderr, "Parsing error!"
+		exit(1)
+
+	# setup context
+	context = OpenSSL.SSL.Context(version)
+	try:
+		if not args['ciphers'] is None:
+			context.set_cipher_list(args['ciphers'])
+		if (not args['cacert'] is None) and args['pinnedcertificate'] is None:
+			context.load_verify_locations(args['cacert'])
+		else:
+			context.set_default_verify_paths()
+		context.set_verify(OpenSSL.SSL.VERIFY_PEER, callback)
+
+	except:
+		print >> sys.stderr, "Context setup error!"
+		exit(1)
+
+	# url parse
+	try:
+		url_parse = urlparse(args['url'])
+		if url_parse.scheme != 'https':
+			sys.stderr.write("HTTPs schme error!\n")
+		port = 443
+		if not url_parse.port == None:
+			port = url_parse.port
+	except:
+		print >> sys.stderr, "Url parsing error!"
+		exit(1)
+
+	# connection
+	try:
+		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		connection = OpenSSL.SSL.Connection(context, s)
+		connection.connect((url_parse.hostname, port))
+	except socket.error: 
+		print >> sys.stderr, "Socket error!"
+		exit(1)
+
+	#socket
+	try:
+		connection.do_handshake()
+	except OpenSSL.SSL.WantReadError:
+		print >> sys.stderr, "Handshake error!"
+		exit(1)
+
+	message = "GET " + url_parse.path + " HTTP/1.0\r\nHost: " + url_parse.hostname + "\r\n\r\n"
+	connection.sendall(message)
+
+	header = True;
+	while 1:
+		try:
+			block = connection.recv(1024).decode('utf-8')
+			if ("\r\n\r\n" in block and header):
+				str_arr = block.split("\r\n\r\n", 1)
+				block = str_arr[1]
+				header = False;
+			sys.stdout.write(block)
+			sys.stdout.flush()
+		except OpenSSL.SSL.Error:
+			break
+
+	connection.shutdown()
+	connection.close()
+	exit(0)
