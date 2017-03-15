@@ -3,6 +3,14 @@
 import sys, os, urlparse
 import socket
 from OpenSSL import SSL, crypto
+import datetime
+
+crlfile = None
+crl_list = None
+allow_stale_certs_num = None
+pinnedcertificate = None
+pinned_cert_hash = None
+hostname = None
 
 def main(argv):
   versions = {
@@ -12,12 +20,16 @@ def main(argv):
     '--sslv3': SSL.SSLv3_METHOD,
     '-3': SSL.SSLv3_METHOD
   }
+
+  global crlfile
+  global crl_list
+  global allow_stale_certs_num
+  global pinnedcertificate
+  global pinned_cert_hash
+  global hostname
   method = SSL.TLSv1_2_METHOD
   ciphers = None
-  crlfile = None
   cacert = None
-  allow_stale_certs_num = None
-  pinnedcertificate = None
   raw_url = None
   port = 443
 
@@ -45,7 +57,7 @@ def main(argv):
     elif arg == "--allow-stale-certs":
       i += 1
       if i < argc:
-        allow_stale_certs_num = argv[i]
+        allow_stale_certs_num = int(argv[i])
     elif arg == "--pinnedcertificate":
       i += 1
       if i < argc:
@@ -58,15 +70,37 @@ def main(argv):
   if raw_url is None:
     error("ERROR: no URL specified\n")
 
+  if pinnedcertificate is not None:
+    crlfile = None
+    allow_stale_certs_num = None
+    cacert = None
+    try:
+      with open(pinnedcertificate) as f:
+        buffer = f.read()
+      pinned_cert_hash = crypto.load_certificate(crypto.FILETYPE_PEM, buffer).digest("sha256")
+      f.close()
+    except IOError:
+      error("IOError when reading files.\n")
+
   if allow_stale_certs_num is not None:
-    if (allow_stale_certs_num < 0) or (not allow_stale_certs_num.is_integer()):
+    if allow_stale_certs_num < 0:
       error("ERROR: allow_stale_certs_num should be a non-negative integer\n")
+
+  if crlfile is not None:
+    try:
+      with open(crlfile) as f1:
+        buffer1 = f1.read()
+      crl_list = crypto.load_crl(crypto.FILETYPE_PEM, buffer1).get_revoked()
+      f1.close()
+    except IOError:
+      error("IOError when reading files.\n")
 
   url = urlparse.urlparse(raw_url)
   if url.scheme != 'https':
     error("ERROR: URL rejected because scheme is not https\n")
   if url.port is not None:
     port = url.port
+  hostname = url.hostname
 
   # set context
   context = SSL.Context(method)
@@ -78,15 +112,16 @@ def main(argv):
     except:
       error("Invalid ciphers.\n")
 
-  # verify cacert
+  # add cacert
   if cacert is None:
     context.set_default_verify_paths()
   else:
     context.load_verify_locations(cacert)
 
+  # verify during handshake
   context.set_verify(SSL.VERIFY_PEER, verify_cb)
   
-  # SNI features
+  # connect with SNI features
   sock = SSL.Connection(context, socket.socket(socket.AF_INET, socket.SOCK_STREAM))
   try:
     sock.connect((url.hostname, port))
@@ -97,18 +132,19 @@ def main(argv):
   try:
     sock.do_handshake()
   except SSL.Error:
-    error("Error in handshake.\n")
-
+    error("Error: verification failed or and unexpected error in handshake.\n")
+  # except:
+    # error("Unexpected errors in handshake.\n")
   # TODO: check domain matches wildcard/alt names
-  # print "2**\n", sock.get_peer_certificate().get_subject().commonName.decode()
+  #print "2**\n", sock.get_peer_certificate().get_subject().commonName
 
   # send and receiver messages
-  sock.sendall('GET ' + url.path + ' HTTP/1.0\r\nHost: ' + url.hostname + '\r\nUser-Agent: scurl/yixin\r\nConnection: close\r\n\r\n')
+  sock.sendall('GET ' + url.path + ' HTTP/1.0\r\nHost: ' + url.hostname + '\r\nUser-Agent: scurl/yixin\r\nAccept: */*\r\nConnection: close\r\n\r\n')
   header = True
   msgs = []
   while 1:
     try:
-      msg = sock.recv(1024).decode('utf-8')
+      msg = sock.recv(1024)
       if not header:
         msgs.append(msg)
       elif '\r\n\r\n' in msg:
@@ -117,12 +153,14 @@ def main(argv):
     except SSL.ZeroReturnError:
       printHTML(msgs)
       break
-    except SSL.SysCallError:
-      if ''.join(msgs).endswith('</html>'):
+    except SSL.SysCallError as e:
+      if e[1] == 'Unexpected EOF':
         printHTML(msgs)
+        break
       else:
-        # printHTML(msgs)
-        error('Unexpected EOF\n')
+        error('Syscall error, not EOF\n')
+    except SSL.Error:
+      error('Other unexpected errors when receiving messages.\n')
 
   # cleanup
   sock.shutdown()
@@ -131,15 +169,39 @@ def main(argv):
 def verify_cb(conn, cert, errnum, depth, ok):
   certsubject = crypto.X509Name(cert.get_subject())
   commonname = certsubject.commonName
-  # print "1**\n", commonname
+  #print "1**\n", commonname
+  if pinnedcertificate is not None:
+    # check pinned certificate
+    if depth == 0:
+      # load certificate
+      cert_hash = cert.digest("sha256")
+      return (pinned_cert_hash == cert_hash)
+    else:
+      return True
+  else:
+    # if depth == 0:
+      # TODO check name match
+      # return ok
+
+    # check crl
+    if crlfile is not None:
+      serial_number_to_hex_str = str(format(cert.get_serial_number(), 'X'))
+      for revoke in crl_list:
+        if revoke.get_serial() == serial_number_to_hex_str:
+          return False
+
+    # allow expired certificate
+    if allow_stale_certs_num is not None and cert.has_expired():
+      expired_time = datetime.datetime.strptime(cert.get_notAfter(), "%Y%m%d%H%M%SZ")
+      new_time = expired_time + datetime.timedelta(days = allow_stale_certs_num)
+      return new_time > datetime.datetime.utcnow()
   
-  # TODO pinnedcertificate
-  # TODO check crlfile
-  # TODO check expired date
+  # Nothing is detected
   return ok
 
 def error(msg):
   sys.stderr.write(msg)
+  sys.stdout.flush()
   sys.exit(-1)
 
 def printHTML(msgs):
