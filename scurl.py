@@ -136,7 +136,6 @@ def main(argv):
     error("Error: verification failed or and unexpected error in handshake.\n")
   # except:
     # error("Unexpected errors in handshake.\n")
-  # TODO: check domain matches wildcard/alt names
 
   if not checkMatch(sock.get_peer_certificate(), url.hostname):
     error("Error in domain matches in certificates.\n")
@@ -172,11 +171,10 @@ def main(argv):
 def checkMatch(cert, hostname):
   # check commonName
   commonName = cert.get_subject().commonName.decode()
-  pattern = r'(?:^|\s)(\w+\.)?' + commonName.replace('.', '\.')[3:] + '(?:$|\s)'
+  pattern = r'^[^.]*\.?' + commonName.replace('.', '\.')[3:] + '(?:$|\s)'
   match = re.search(pattern, hostname)
   if hostname == commonName or match:
     return True
-
   length = cert.get_extension_count()
   for i in range(length):
     ext = cert.get_extension(i)
@@ -188,7 +186,7 @@ def checkMatch(cert, hostname):
         item = item[4:] #remove DNS:
         if hostname in item:
           return True
-        pattern = r'(?:^|\s)(\w+\.)?' + item.replace('.', '\.')[3:] + '(?:$|\s)'
+        pattern = r'^[^.]*\.?' + item.replace('.', '\.')[3:] + '(?:$|\s)'
         match = re.search(pattern, hostname)
         if match:
           return True
@@ -211,7 +209,6 @@ def verify_cb(conn, cert, errnum, depth, ok):
     # if depth == 0:
       # TODO check name match
       # return ok
-
     # check crl
     if crlfile is not None:
       serial_number_to_hex_str = str(format(cert.get_serial_number(), 'X'))
