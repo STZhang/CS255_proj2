@@ -141,7 +141,10 @@ def main(argv):
     error("Error in domain matches in certificates.\n")
 
   # send and receive messages
-  sock.sendall('GET ' + url.path + ' HTTP/1.0\r\nHost: ' + url.hostname + '\r\nUser-Agent: scurl/yixin\r\nAccept: */*\r\nConnection: close\r\n\r\n')
+  path = url.path
+  if len(path) == 0:
+    path = "/"
+  sock.sendall('GET ' + path + ' HTTP/1.0\r\nHost: ' + url.hostname + '\r\nUser-Agent: scurl/yixin\r\nAccept: */*\r\nConnection: close\r\n\r\n')
   header = True
   msgs = []
   while 1:
