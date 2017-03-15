@@ -134,13 +134,13 @@ def main(argv):
     sock.do_handshake()
   except SSL.Error:
     error("Error: verification failed or and unexpected error in handshake.\n")
-  # except:
-    # error("Unexpected errors in handshake.\n")
+  except:
+    error("Error: Unexpected errors in handshake.\n")
 
   if not checkMatch(sock.get_peer_certificate(), url.hostname):
     error("Error in domain matches in certificates.\n")
 
- # send and receiver messages
+  # send and receive messages
   sock.sendall('GET ' + url.path + ' HTTP/1.0\r\nHost: ' + url.hostname + '\r\nUser-Agent: scurl/yixin\r\nAccept: */*\r\nConnection: close\r\n\r\n')
   header = True
   msgs = []
@@ -196,7 +196,7 @@ def checkMatch(cert, hostname):
 def verify_cb(conn, cert, errnum, depth, ok):
   certsubject = crypto.X509Name(cert.get_subject())
   commonname = certsubject.commonName
-  #print "1**\n", commonname
+
   if pinnedcertificate is not None:
     # check pinned certificate
     if depth == 0:
@@ -206,9 +206,6 @@ def verify_cb(conn, cert, errnum, depth, ok):
     else:
       return True
   else:
-    # if depth == 0:
-      # TODO check name match
-      # return ok
     # check crl
     if crlfile is not None:
       serial_number_to_hex_str = str(format(cert.get_serial_number(), 'X'))
@@ -227,7 +224,7 @@ def verify_cb(conn, cert, errnum, depth, ok):
 
 def error(msg):
   sys.stderr.write(msg)
-  sys.stdout.flush()
+  sys.stderr.flush()
   sys.exit(-1)
 
 def printHTML(msgs):
