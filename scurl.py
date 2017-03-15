@@ -2,6 +2,7 @@
 
 import sys, os, urlparse
 import socket
+import re
 from OpenSSL import SSL, crypto
 import datetime
 
@@ -136,9 +137,11 @@ def main(argv):
   # except:
     # error("Unexpected errors in handshake.\n")
   # TODO: check domain matches wildcard/alt names
-  #print "2**\n", sock.get_peer_certificate().get_subject().commonName
 
-  # send and receiver messages
+  if not checkMatch(sock.get_peer_certificate(), url.hostname):
+    error("Error in domain matches in certificates.\n")
+
+ # send and receiver messages
   sock.sendall('GET ' + url.path + ' HTTP/1.0\r\nHost: ' + url.hostname + '\r\nUser-Agent: scurl/yixin\r\nAccept: */*\r\nConnection: close\r\n\r\n')
   header = True
   msgs = []
@@ -165,6 +168,32 @@ def main(argv):
   # cleanup
   sock.shutdown()
   sock.close()
+
+def checkMatch(cert, hostname):
+  # check commonName
+  commonName = cert.get_subject().commonName.decode()
+  pattern = r'(?:^|\s)(\w+\.)?' + commonName.replace('.', '\.')[3:] + '(?:$|\s)'
+  match = re.search(pattern, hostname)
+  if hostname == commonName or match:
+    return True
+
+  length = cert.get_extension_count()
+  for i in range(length):
+    ext = cert.get_extension(i)
+    if ext.get_short_name() == "subjectAltName":
+      alt = ext._subjectAltNameString()
+      alt_list = alt.split(', ')
+      # check match
+      for item in alt_list:
+        item = item[4:] #remove DNS:
+        if hostname in item:
+          return True
+        pattern = r'(?:^|\s)(\w+\.)?' + item.replace('.', '\.')[3:] + '(?:$|\s)'
+        match = re.search(pattern, hostname)
+        if match:
+          return True
+      break
+  return False
 
 def verify_cb(conn, cert, errnum, depth, ok):
   certsubject = crypto.X509Name(cert.get_subject())
