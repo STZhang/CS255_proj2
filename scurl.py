@@ -187,7 +187,7 @@ def checkMatch(cert, hostname):
       # check match
       for item in alt_list:
         item = item[4:] #remove DNS:
-        if hostname in item:
+        if hostname == item:
           return True
         pattern = r'^[^.]*\.?' + item.replace('.', '\.')[3:] + '(?:$|\s)'
         match = re.search(pattern, hostname)
