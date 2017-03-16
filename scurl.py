@@ -63,8 +63,8 @@ def main(argv):
       i += 1
       if i < argc:
         pinnedcertificate = argv[i]
-    # else:
-      # warning 
+    else:
+      error("ERROR: Garbage in arguments.\n") 
     i += 1
 
   # check wrong arguments
@@ -137,8 +137,9 @@ def main(argv):
   except:
     error("Error: Unexpected errors in handshake.\n")
 
-  if not checkMatch(sock.get_peer_certificate(), url.hostname):
-    error("Error in domain matches in certificates.\n")
+  if pinnedcertificate is None:
+    if not checkMatch(sock.get_peer_certificate(), url.hostname):
+      error("Error in domain matches in certificates.\n")
 
   # send and receive messages
   path = url.path
