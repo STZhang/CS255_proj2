@@ -218,13 +218,16 @@ def verify_cb(conn, cert, errnum, depth, ok):
           return False
 
     # allow expired certificate
-    if allow_stale_certs_num is not None and cert.has_expired():
+    if allow_stale_certs_num is not None and errnum == 10:
       expired_time = datetime.datetime.strptime(cert.get_notAfter(), "%Y%m%d%H%M%SZ")
       new_time = expired_time + datetime.timedelta(days = allow_stale_certs_num)
       return new_time > datetime.datetime.utcnow()
   
   # Nothing is detected
-  return ok
+  if ok and errnum == 0:
+    return True
+  else:
+    return False
 
 def error(msg):
   sys.stderr.write(msg)
